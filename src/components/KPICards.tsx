@@ -30,7 +30,15 @@ export default function KPICards() {
 
     return (
         <div>
-            <div className="section-label" style={{ marginBottom: 14 }}>Key Performance Indicators — 360° View</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 14 }}>
+                <div className="section-label" style={{ margin: 0 }}>Key Performance Indicators — 360° View</div>
+                {kpi.projectLabel && (
+                    <span style={{ fontSize: 13, fontWeight: 700, color: kpi.isAllProjects ? 'var(--cyan)' : 'var(--violet-light)', background: 'var(--bg-glass)', padding: '3px 10px', borderRadius: 20, border: '1px solid var(--border)' }}>
+                        {kpi.isAllProjects ? '📂' : '📁'} {kpi.projectLabel}
+                    </span>
+                )}
+                {!kpi.projectLabel && <span style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>No project loaded — upload an Excel or enable mock data</span>}
+            </div>
             <div className="kpi-grid">
                 <KPICard label="Sprint Velocity" value={kpi.latestVelocity}
                     sub={`${kpi.avgVelocity} pts avg (${kpi.sprintCount} sprints)`}
@@ -80,8 +88,10 @@ export default function KPICards() {
                     color={kpi.milestones.delayed > 1 ? 'var(--red)' : kpi.milestones.delayed === 1 ? 'var(--amber)' : 'var(--emerald)'}
                     icon={<Flag size={18} />} />
 
-                <KPICard label="On-Time Delivery" value="87%"
-                    sub="Last 12 sprints rolling" trend="up" trendLabel="+2% vs last month"
+                <KPICard label="On-Time Delivery" value={`${kpi.onTimeDelivery}%`}
+                    sub={`${kpi.sprintCount} sprints tracked`}
+                    trend={kpi.onTimeDelivery >= 80 ? 'up' : kpi.onTimeDelivery >= 60 ? 'flat' : 'down'}
+                    trendLabel={kpi.onTimeDelivery >= 80 ? 'On target' : 'Below target'}
                     color="var(--cyan)" icon={<Clock size={18} />} />
             </div>
         </div>

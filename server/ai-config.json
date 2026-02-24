@@ -1,0 +1,8 @@
+{
+    "ai": {
+        "provider": "openai",
+        "baseUrl": "https://api.openai.com/v1/chat/completions",
+        "apiKey": "YOUR_OPENAI_API_KEY",
+        "model": "gpt-4"
+    }
+}

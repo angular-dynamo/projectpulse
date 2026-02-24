@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useState, type ReactNode } from 'react';
 import type { DashboardState, Persona, JiraStory, WeeklyReport } from '../types/index';
 
 const API_BASE = 'http://127.0.0.1:3001/api';
@@ -16,7 +16,7 @@ type Action =
 
 const initialState: DashboardState = {
     persona: 'tpm',
-    selectedWeek: '2026-W07',
+    selectedWeek: '',
     selectedProjectId: 'proj1',
     projects: [],
     teamMembers: [],
@@ -53,24 +53,58 @@ function reducer(state: DashboardState, action: Action): DashboardState {
 interface DashboardContextType {
     state: DashboardState;
     dispatch: React.Dispatch<Action>;
+    serverDown: boolean;
+    retryConnect: () => void;
 }
 
 const DashboardContext = createContext<DashboardContextType | null>(null);
 
 export function DashboardProvider({ children }: { children: ReactNode }) {
     const [state, dispatch] = useReducer(reducer, initialState);
+    const [serverDown, setServerDown] = useState(false);
 
-    useEffect(() => {
+    const loadData = () => {
         fetch(`${API_BASE}/data`)
-            .then(res => res.json())
-            .then(data => {
-                dispatch({ type: 'SET_DATA', payload: data });
+            .then(res => {
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return res.json();
             })
-            .catch(err => console.error('Failed to fetch data:', err));
-    }, []);
+            .then(data => {
+                setServerDown(false);
+                const firstProjectId = data.projects?.[0]?.id ?? '';
+                const weeks = [...new Set((data.jiraStories ?? []).map((s: any) => s.week))].filter(Boolean).sort() as string[];
+                const latestWeek = weeks[weeks.length - 1] ?? '';
+                dispatch({
+                    type: 'SET_DATA',
+                    payload: {
+                        ...data,
+                        selectedProjectId: firstProjectId || initialState.selectedProjectId,
+                        selectedWeek: latestWeek,
+                    }
+                });
+            })
+            .catch(err => {
+                console.error('[ERR-485] Backend unreachable:', err.message);
+                setServerDown(true);
+                dispatch({
+                    type: 'SET_DATA',
+                    payload: { projects: [], teamMembers: [], jiraStories: [], milestones: [], sprints: [], risks: [], leaveEntries: [], weeklyReports: [] }
+                });
+            });
+    };
+
+    // Initial data load
+    useEffect(() => { loadData(); }, []);
+
+    // Auto-retry every 15s while server is down — banner dismisses automatically on recovery
+    useEffect(() => {
+        if (!serverDown) return;
+        const interval = setInterval(loadData, 15000);
+        return () => clearInterval(interval);
+    }, [serverDown]);
 
     return (
-        <DashboardContext.Provider value={{ state, dispatch }}>
+        <DashboardContext.Provider value={{ state, dispatch, serverDown, retryConnect: loadData }}>
             {children}
         </DashboardContext.Provider>
     );

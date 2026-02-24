@@ -22,9 +22,10 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 // Mock login logic based on team members
 const MOCK_USERS: Record<string, Role> = {
+    'admin@acme.com': 'admin',      // Default system admin — always available
     'priya@acme.com': 'admin',      // Priya - Frontend Lead (Admin for demo)
     'kavita@acme.com': 'tpm',       // Kavita - TPM
-    'david@acme.com': 'director',   // David - Director (needs to be added or mocked)
+    'david@acme.com': 'director',   // David - Director
     'rahul@acme.com': 'developer',  // Rahul - Developer
 };
 
@@ -59,7 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 if (email === 'david@acme.com') {
                     member = { id: 'dir1', name: 'David Park', role: 'Director', avatar: 'DP', email: 'david@acme.com', totalHoursPerWeek: 40 };
                 } else {
-                    throw new Error('User not found. Try priya@acme.com, kavita@acme.com, or rahul@acme.com');
+                    throw new Error('User not found. Use admin@acme.com to login, or enable "Load Mock Data" toggle for demo accounts.');
                 }
             }
 

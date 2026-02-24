@@ -76,7 +76,7 @@ ${html}
             const res = await fetch('http://127.0.0.1:3001/api/confluence/publish', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ reportRowHtml: html }),
+                body: JSON.stringify({ reportRowHtml: html, week: report.week, projectId: project?.id }),
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Publish failed');

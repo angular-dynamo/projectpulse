@@ -1,8 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useDashboard } from '../context/DashboardContext';
 import type { WeeklyReport, RAGStatus } from '../types/index';
-import { Save, CheckCircle } from 'lucide-react';
-import { WEEKS } from '../data/mockData';
+import { Save, CheckCircle, Wand2, RefreshCw, Edit, FileText } from 'lucide-react';
 
 const RAG_OPTS: { value: RAGStatus; label: string; color: string }[] = [
     { value: 'green', label: '🟢 Green — On Track', color: 'var(--emerald)' },
@@ -30,8 +29,117 @@ export default function WeeklyStatusPanel() {
         ragStatus: (report?.ragStatus ?? 'green') as RAGStatus,
         accomplishments: report?.accomplishments ?? '',
         nextWeekPlan: report?.nextWeekPlan ?? '',
+        risksMitigation: report?.risksMitigation ?? '',
         blockers: report?.blockers ?? '',
     });
+
+    useEffect(() => {
+        setForm({
+            ragStatus: (report?.ragStatus ?? 'green') as RAGStatus,
+            accomplishments: report?.accomplishments ?? '',
+            nextWeekPlan: report?.nextWeekPlan ?? '',
+            risksMitigation: report?.risksMitigation ?? '',
+            blockers: report?.blockers ?? '',
+        });
+    }, [report]);
+
+    const [colFilters, setColFilters] = useState({
+        week: '',
+        ragStatus: '',
+        status: '',
+        preparedBy: '',
+        updatedAt: ''
+    });
+
+    const [isGenerating, setIsGenerating] = useState(false);
+
+    // ─── Auto-Fill from Stories grouped by Week ───────────────────────────────
+    const weekStories = state.jiraStories.filter(
+        s => s.projectId === state.selectedProjectId && s.week === state.selectedWeek
+    );
+
+    function handleAutoFillFromStories() {
+        if (!weekStories.length) {
+            setToastMsg('⚠️ No stories found for the selected week.');
+            setTimeout(() => setToastMsg(''), 3000);
+            return;
+        }
+
+        const doneStories = weekStories.filter(s => s.status === 'done');
+        const inProgressStories = weekStories.filter(s => s.status === 'inprogress');
+        const blockedStories = weekStories.filter(s => s.status === 'blocked');
+        const todoStories = weekStories.filter(s => s.status === 'todo');
+
+        const accomplishments = [
+            ...doneStories.map(s => `• [${s.id}] ${s.title} — Done (${s.storyPoints} pts)${s.description ? `\n  ${s.description}` : ''}${s.acceptanceCriteria ? `\n  Acceptance: ${s.acceptanceCriteria}` : ''}`),
+            ...inProgressStories.map(s => `• [${s.id}] ${s.title} — In Progress (${s.storyPoints} pts)${s.description ? `\n  ${s.description}` : ''}`),
+        ].join('\n');
+
+        const nextWeekPlan = [
+            ...todoStories.map(s => `• [${s.id}] ${s.title} — To Do (${s.storyPoints} pts)${s.description ? `\n  ${s.description}` : ''}`),
+        ].join('\n') || 'No pending stories found.'
+
+        const allRisks = weekStories
+            .filter(s => s.risksMitigation)
+            .map(s => `• [${s.id}] ${s.risksMitigation}`).join('\n');
+
+        const allBlockers = [
+            ...blockedStories.map(s => `• [${s.id}] ${s.title} — Blocked`),
+            ...weekStories.filter(s => s.blockers).map(s => `• [${s.id}] ${s.blockers}`)
+        ].join('\n');
+
+        setForm(f => ({
+            ...f,
+            accomplishments: accomplishments || f.accomplishments,
+            nextWeekPlan: nextWeekPlan || f.nextWeekPlan,
+            risksMitigation: allRisks || f.risksMitigation,
+            blockers: allBlockers || f.blockers,
+        }));
+
+        setToastMsg(`✅ Auto-filled from ${weekStories.length} stories for ${state.selectedWeek}`);
+        setTimeout(() => setToastMsg(''), 3000);
+    }
+
+    const filteredReports = state.weeklyReports
+        .filter(r => r.projectId === state.selectedProjectId)
+        .filter(r => {
+            if (colFilters.week && !r.week.toLowerCase().includes(colFilters.week.toLowerCase())) return false;
+            if (colFilters.ragStatus && !r.ragStatus.toLowerCase().includes(colFilters.ragStatus.toLowerCase())) return false;
+            if (colFilters.status && !r.status.toLowerCase().includes(colFilters.status.toLowerCase())) return false;
+            if (colFilters.preparedBy && !r.preparedBy.toLowerCase().includes(colFilters.preparedBy.toLowerCase())) return false;
+            if (colFilters.updatedAt && !(r.updatedAt || '').toLowerCase().includes(colFilters.updatedAt.toLowerCase())) return false;
+            return true;
+        });
+
+    async function handleGenerateAI() {
+        setIsGenerating(true);
+        setToastMsg('');
+        try {
+            const res = await fetch(`${API_BASE}/ai/summarize-weekly`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ projectId: state.selectedProjectId, week: state.selectedWeek })
+            });
+            if (!res.ok) {
+                const errData = await res.json();
+                throw new Error(errData.error || 'Failed to generate summary');
+            }
+            const data = await res.json();
+            setForm(f => ({
+                ...f,
+                accomplishments: data.accomplishments || f.accomplishments,
+                nextWeekPlan: data.nextWeekPlan || f.nextWeekPlan,
+                risksMitigation: data.risksMitigation || f.risksMitigation,
+                blockers: data.blockers || f.blockers
+            }));
+            setToastMsg('AI Summary Generated Successfully ✨');
+            setTimeout(() => setToastMsg(''), 3000);
+        } catch (error: any) {
+            setToastMsg(`⚠️ ${error.message}`);
+        } finally {
+            setIsGenerating(false);
+        }
+    }
 
     async function handleSave() {
         let updatedReport: WeeklyReport;
@@ -98,6 +206,79 @@ export default function WeeklyStatusPanel() {
             </div>
 
             <div className="charts-grid">
+                {/* Project status history */}
+                <div className="card chart-full">
+                    <div className="card-header">
+                        <div className="card-title">📋 Report History</div>
+                    </div>
+                    <table className="data-table">
+                        <thead>
+                            <tr>
+                                <th>Week</th>
+                                <th>RAG</th>
+                                <th>Status</th>
+                                <th>Prepared By</th>
+                                <th>Updated</th>
+                                <th>Action</th>
+                            </tr>
+                            <tr className="filter-row" style={{ background: 'var(--bg-glass)', borderBottom: '1px solid var(--border)' }}>
+                                <th style={{ padding: '8px 16px' }}>
+                                    <input type="text" className="form-input" style={{ width: '100%', padding: '4px 8px', fontSize: 12, height: 28 }} placeholder="Search..."
+                                        value={colFilters.week} onChange={e => setColFilters(f => ({ ...f, week: e.target.value }))} />
+                                </th>
+                                <th style={{ padding: '8px 16px' }}>
+                                    <input type="text" className="form-input" style={{ width: '100%', padding: '4px 8px', fontSize: 12, height: 28 }} placeholder="Search..."
+                                        value={colFilters.ragStatus} onChange={e => setColFilters(f => ({ ...f, ragStatus: e.target.value }))} />
+                                </th>
+                                <th style={{ padding: '8px 16px' }}>
+                                    <input type="text" className="form-input" style={{ width: '100%', padding: '4px 8px', fontSize: 12, height: 28 }} placeholder="Search..."
+                                        value={colFilters.status} onChange={e => setColFilters(f => ({ ...f, status: e.target.value }))} />
+                                </th>
+                                <th style={{ padding: '8px 16px' }}>
+                                    <input type="text" className="form-input" style={{ width: '100%', padding: '4px 8px', fontSize: 12, height: 28 }} placeholder="Search..."
+                                        value={colFilters.preparedBy} onChange={e => setColFilters(f => ({ ...f, preparedBy: e.target.value }))} />
+                                </th>
+                                <th style={{ padding: '8px 16px' }}>
+                                    <input type="text" className="form-input" style={{ width: '100%', padding: '4px 8px', fontSize: 12, height: 28 }} placeholder="Search..."
+                                        value={colFilters.updatedAt} onChange={e => setColFilters(f => ({ ...f, updatedAt: e.target.value }))} />
+                                </th>
+                                <th style={{ padding: '8px 16px' }}></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {filteredReports.map(r => (
+                                <tr key={r.id}>
+                                    <td style={{ fontWeight: 600 }}>{r.week}</td>
+                                    <td><span className={`rag-badge rag-${r.ragStatus}`}>{r.ragStatus}</span></td>
+                                    <td>
+                                        <span className={`status-pill ${r.status === 'approved' ? 'pill-done' : r.status === 'rejected' ? 'pill-blocked' : 'pill-inprogress'}`}>
+                                            {r.status}
+                                        </span>
+                                    </td>
+                                    <td>{r.preparedBy}</td>
+                                    <td className="text-xs text-muted">{r.updatedAt?.slice(0, 10) || ''}</td>
+                                    <td>
+                                        <button
+                                            className="btn btn-secondary"
+                                            style={{ padding: '6px 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, opacity: r.status === 'approved' ? 0.5 : 1 }}
+                                            disabled={r.status === 'approved'}
+                                            title={r.status === 'approved' ? 'Approved reports cannot be updated' : ''}
+                                            onClick={() => {
+                                                dispatch({ type: 'SET_DATA', payload: { selectedWeek: r.week } });
+                                                window.scrollTo({ top: 0, behavior: 'smooth' });
+                                                setToastMsg(`Loaded report for ${r.week}`);
+                                                setTimeout(() => setToastMsg(''), 3000);
+                                            }}
+                                        >
+                                            <Edit size={12} /> Update
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+
                 {/* Left — form */}
                 <div className="card chart-full">
                     <div className="card-header">
@@ -133,9 +314,18 @@ export default function WeeklyStatusPanel() {
                                 onChange={e => setForm(f => ({ ...f, nextWeekPlan: e.target.value }))} />
                         </div>
 
+                        {/* Risks & Mitigation */}
+                        <div className="form-group">
+                            <label className="form-label">⚠️ Risks & Mitigation</label>
+                            <textarea className="form-textarea" rows={3}
+                                value={form.risksMitigation} disabled={isApproved}
+                                placeholder="• Risk: [Description] -> Mitigation: [Action]"
+                                onChange={e => setForm(f => ({ ...f, risksMitigation: e.target.value }))} />
+                        </div>
+
                         {/* Blockers */}
                         <div className="form-group">
-                            <label className="form-label">🚧 Blockers & Risks</label>
+                            <label className="form-label">🚧 Blockers</label>
                             <textarea className="form-textarea" rows={3}
                                 value={form.blockers} disabled={isApproved}
                                 placeholder="• Describe any impediments...&#10;• Escalations needed"
@@ -143,47 +333,25 @@ export default function WeeklyStatusPanel() {
                         </div>
 
                         {!isApproved && (
-                            <div className="flex gap-12">
+                            <div className="flex gap-12" style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                                <button className="btn btn-secondary" onClick={handleAutoFillFromStories} title={`Auto-fill from ${weekStories.length} stories for ${state.selectedWeek}`}>
+                                    <FileText size={14} /> Fill from Stories ({weekStories.length})
+                                </button>
+                                <button className="btn btn-secondary" onClick={handleGenerateAI} disabled={isGenerating}>
+                                    {isGenerating ? <RefreshCw size={14} className="spin" /> : <Wand2 size={14} />}
+                                    {isGenerating ? ' Generating...' : ' AI Summary ✨'}
+                                </button>
                                 <button className="btn btn-primary" onClick={handleSave}>
                                     <Save size={14} /> Submit Report
                                 </button>
                                 {report?.status === 'rejected' && (
-                                    <span style={{ color: 'var(--red)', fontSize: 12, alignSelf: 'center' }}>
+                                    <span style={{ color: 'var(--red)', fontSize: 12 }}>
                                         ⚠ Rejected: {report.approvalComment}
                                     </span>
                                 )}
                             </div>
                         )}
                     </div>
-                </div>
-
-                {/* Project status history */}
-                <div className="card chart-full">
-                    <div className="card-header">
-                        <div className="card-title">📋 Report History</div>
-                    </div>
-                    <table className="data-table">
-                        <thead>
-                            <tr><th>Week</th><th>RAG</th><th>Status</th><th>Prepared By</th><th>Updated</th></tr>
-                        </thead>
-                        <tbody>
-                            {state.weeklyReports
-                                .filter(r => r.projectId === state.selectedProjectId)
-                                .map(r => (
-                                    <tr key={r.id}>
-                                        <td style={{ fontWeight: 600 }}>{r.week}</td>
-                                        <td><span className={`rag-badge rag-${r.ragStatus}`}>{r.ragStatus}</span></td>
-                                        <td>
-                                            <span className={`status-pill ${r.status === 'approved' ? 'pill-done' : r.status === 'rejected' ? 'pill-blocked' : 'pill-inprogress'}`}>
-                                                {r.status}
-                                            </span>
-                                        </td>
-                                        <td>{r.preparedBy}</td>
-                                        <td className="text-xs text-muted">{r.updatedAt?.slice(0, 10) || ''}</td>
-                                    </tr>
-                                ))}
-                        </tbody>
-                    </table>
                 </div>
             </div>
 

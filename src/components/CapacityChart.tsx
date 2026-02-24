@@ -1,6 +1,8 @@
+import React, { useRef, useState } from 'react';
 import { useDashboard } from '../context/DashboardContext';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from 'recharts';
-import { Coffee, Plane, Stethoscope, Home } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { Coffee, Plane, Stethoscope, Home, Upload, RefreshCw, Download } from 'lucide-react';
+import * as xlsx from 'xlsx';
 
 const AVATAR_COLORS = ['#6d6cff', '#22d3ee', '#10b981', '#f59e0b', '#ef4444', '#a78bfa'];
 
@@ -28,7 +30,10 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 export default function CapacityChart() {
-    const { state } = useDashboard();
+    const { state, dispatch } = useDashboard();
+    const [loading, setLoading] = useState(false);
+    const [msg, setMsg] = useState({ text: '', type: '' });
+    const fileInput = useRef<HTMLInputElement>(null);
 
     const devIds = ['tm1', 'tm2', 'tm3', 'tm4', 'tm5', 'tm6'];
     const devMembers = state.teamMembers.filter(m => devIds.includes(m.id));
@@ -54,9 +59,119 @@ export default function CapacityChart() {
     const totalCapacity = devMembers.reduce((a, m) => a + m.totalHoursPerWeek, 0);
     const effectiveCapacity = totalCapacity - totalLeave;
 
+    const API_BASE = 'http://127.0.0.1:3001/api';
+
+    const handleLeavesImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setLoading(true);
+        setMsg({ text: '', type: '' });
+
+        try {
+            const data = await file.arrayBuffer();
+            const workbook = xlsx.read(data);
+            const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+            const json = xlsx.utils.sheet_to_json(worksheet);
+
+            if (!json.length) throw new Error("File is empty or invalid format.");
+
+            // Transform uploaded data to leave_entries format
+            // Expected columns: ID, Member ID, Week, Hours Off, Type
+            const formattedLeaves = json.map((row: any) => ({
+                id: row['ID'] || `LV-${Math.floor(Math.random() * 10000)}`,
+                memberId: row['Member ID'] || row['memberId'] || 'tm1',
+                week: row['Week'] || row['week'] || state.selectedWeek,
+                hoursOff: Number(row['Hours Off'] || row['hoursOff']) || 0,
+                type: (row['Type'] || row['type'] || 'vacation').toLowerCase()
+            }));
+
+            const res = await fetch(`${API_BASE}/leave_entries/bulk`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(formattedLeaves)
+            });
+
+            if (!res.ok) throw new Error('Failed to import leaves');
+
+            // Update local state
+            const nextLeaves = [...state.leaveEntries];
+            for (const fl of formattedLeaves) {
+                const idx = nextLeaves.findIndex(l => l.id === fl.id);
+                if (idx >= 0) {
+                    nextLeaves[idx] = { ...nextLeaves[idx], ...fl };
+                } else {
+                    nextLeaves.push(fl as any);
+                }
+            }
+
+            dispatch({ type: 'SET_DATA', payload: { leaveEntries: nextLeaves } });
+            setMsg({ type: 'success', text: `Successfully imported ${formattedLeaves.length} leave records.` });
+        } catch (error: any) {
+            setMsg({ type: 'error', text: error.message || 'Import failed' });
+        } finally {
+            setLoading(false);
+            if (fileInput.current) fileInput.current.value = '';
+
+            // clear msg after 3 seconds
+            setTimeout(() => setMsg({ text: '', type: '' }), 3000);
+        }
+    };
+
+    const downloadLeavesTemplate = () => {
+        const wb = xlsx.utils.book_new();
+        const headers = ['ID', 'Member ID', 'Week', 'Hours Off', 'Type'];
+        const sampleRow = { 'ID': 'LV-001', 'Member ID': 'tm1', 'Week': state.selectedWeek, 'Hours Off': 8, 'Type': 'vacation' };
+
+        const ws = xlsx.utils.json_to_sheet([sampleRow], { header: headers });
+        xlsx.utils.book_append_sheet(wb, ws, 'Template');
+        xlsx.writeFile(wb, `leaves_template.xlsx`);
+    };
+
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div className="section-label">Leave-Adjusted Team Capacity</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="section-label" style={{ margin: 0 }}>Leave-Adjusted Team Capacity</div>
+
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    {msg.text && (
+                        <span style={{
+                            fontSize: 12,
+                            color: msg.type === 'error' ? 'var(--red)' : 'var(--emerald)',
+                            display: 'flex', alignItems: 'center', gap: 4
+                        }}>
+                            {msg.text}
+                        </span>
+                    )}
+
+                    <input
+                        type="file"
+                        accept=".xlsx, .xls"
+                        ref={fileInput}
+                        style={{ display: 'none' }}
+                        onChange={handleLeavesImport}
+                    />
+
+                    <button
+                        className="btn btn-secondary"
+                        onClick={downloadLeavesTemplate}
+                        style={{ padding: '6px 12px', fontSize: 13 }}
+                        title="Download Template"
+                    >
+                        <Download size={16} /> Template
+                    </button>
+
+                    <button
+                        className="btn btn-primary"
+                        onClick={() => fileInput.current?.click()}
+                        disabled={loading}
+                        style={{ padding: '6px 16px', fontSize: 13 }}
+                    >
+                        {loading ? <RefreshCw size={16} className="spin" /> : <Upload size={16} />}
+                        {loading ? 'Uploading...' : 'Upload Leaves'}
+                    </button>
+                </div>
+            </div>
 
             {/* Summary cards */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>

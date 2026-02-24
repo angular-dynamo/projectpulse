@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { useDashboard } from '../context/DashboardContext';
 import * as xlsx from 'xlsx';
-import { Upload, Settings, RefreshCw, LayoutTemplate, Download, Users } from 'lucide-react';
+import { Upload, Settings, RefreshCw, LayoutTemplate, Download, Users, Search } from 'lucide-react';
 import type { Project } from '../types/index';
 import { transformBoardData } from '../utils/boardTransformer';
 
@@ -10,6 +10,8 @@ export default function SettingsView() {
     const [loading, setLoading] = useState(false);
     const [msg, setMsg] = useState({ type: '', text: '' });
     const fileInput = useRef<HTMLInputElement>(null);
+    const [projSearch, setProjSearch] = useState('');
+    const [projTypeFilter, setProjTypeFilter] = useState('all');
 
     const API_BASE = 'http://127.0.0.1:3001/api';
 
@@ -26,20 +28,63 @@ export default function SettingsView() {
             const worksheet = workbook.Sheets[workbook.SheetNames[0]];
             const json = xlsx.utils.sheet_to_json(worksheet);
 
-            if (!json.length) throw new Error("File is empty or invalid format.");
+            if (!json.length) throw new Error('File is empty or invalid format.');
 
-            const formattedStories = transformBoardData(json, state.selectedProjectId, state.selectedWeek);
+            const { stories: formattedStories, projects, projectId, projectName } = transformBoardData(json, state.selectedProjectId, state.selectedWeek);
 
+            // 1. Upsert ALL unique projects found in the data
+            for (const proj of projects) {
+                if (!proj.name || !proj.name.trim()) {
+                    throw new Error(`Project "${proj.id}" is missing a Name. Please fill in the "Project Name" column.`);
+                }
+                await fetch(`${API_BASE}/projects/upsert`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        id: proj.id,
+                        name: proj.name,
+                        code: proj.code,
+                        projectType: proj.type,
+                        status: 'on-track',
+                        ragStatus: 'green',
+                    })
+                });
+            }
+
+            // 2. Bulk-save stories (all rows)
             const res = await fetch(`${API_BASE}/stories/bulk`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(formattedStories)
             });
 
-            if (!res.ok) throw new Error('Failed to import stories');
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                if (res.status === 409 && errData.duplicates?.length) {
+                    const dupList = errData.duplicates.slice(0, 5).join(', ');
+                    const more = errData.duplicates.length > 5 ? ` (+${errData.duplicates.length - 5} more)` : '';
+                    throw new Error(`⚠️ Duplicate records found: ${dupList}${more}. Delete existing data first or use different Story IDs.`);
+                }
+                throw new Error(errData.error || 'Failed to import stories');
+            }
 
-            dispatch({ type: 'SET_DATA', payload: { jiraStories: [...state.jiraStories, ...formattedStories] } });
-            setMsg({ type: 'success', text: `Successfully imported ${formattedStories.length} stories.` });
+            // 3. Re-fetch ALL data from DB
+            const freshData = await fetch(`${API_BASE}/data`).then(r => r.json());
+            const weeks = [...new Set(freshData.jiraStories?.map((s: any) => s.week) ?? [])].filter(Boolean).sort() as string[];
+            const latestWeek = weeks[weeks.length - 1] ?? state.selectedWeek;
+
+            console.log(`[Import] Read ${json.length} rows. Imported ${formattedStories.length} stories across ${projects.length} projects.`);
+
+            dispatch({
+                type: 'SET_DATA',
+                payload: {
+                    ...freshData,
+                    selectedProjectId: projectId || state.selectedProjectId,
+                    selectedWeek: latestWeek,
+                }
+            });
+
+            setMsg({ type: 'success', text: `✅ ${formattedStories.length} stories imported across ${projects.length} projects. (Latest week: ${latestWeek})` });
         } catch (error: any) {
             setMsg({ type: 'error', text: error.message || 'Import failed' });
         } finally {
@@ -78,15 +123,17 @@ export default function SettingsView() {
         let headers: string[] = [];
         let sampleRow: any = {};
 
+        const commonProjectFields = { 'Project Name': 'My Project', 'Project ID': 'proj1', 'Project Code': 'MP' };
+
         if (type === 'scrum') {
-            headers = ['Story ID', 'Title', 'Status', 'Story Points', 'Sprint', 'Assignee', 'Epic', 'Project ID', 'Week'];
-            sampleRow = { 'Story ID': 'SCRUM-101', 'Title': 'Implement Login', 'Status': 'To Do', 'Story Points': 5, 'Sprint': 'Sprint 1', 'Assignee': 'tm1', 'Epic': 'Auth', 'Project ID': 'proj1', 'Week': '2026-W08' };
+            headers = ['Project Name', 'Project ID', 'Project Code', 'Story ID', 'Title', 'Status', 'Story Points', 'Sprint', 'Assignee', 'Epic', 'Week', 'Description', 'Acceptance Criteria', 'Comments', 'Date', 'Risks & Mitigation', 'Blockers'];
+            sampleRow = { ...commonProjectFields, 'Story ID': 'SCRUM-101', 'Title': 'Implement Login', 'Status': 'To Do', 'Story Points': 5, 'Sprint': 'Sprint 1', 'Assignee': 'John Doe', 'Epic': 'Auth', 'Week': '2026-W08', 'Description': 'Setup auth', 'Acceptance Criteria': 'Users can log in', 'Comments': 'No blockers', 'Date': '2026-02-25', 'Risks & Mitigation': 'API delay - mock it', 'Blockers': 'None' };
         } else if (type === 'kanban') {
-            headers = ['Issue key', 'Summary', 'Status', 'Assignee', 'Epic', 'Project ID', 'Week'];
-            sampleRow = { 'Issue key': 'KAN-202', 'Summary': 'Fix Header Bug', 'Status': 'In Progress', 'Assignee': 'tm2', 'Epic': 'UI', 'Project ID': 'proj1', 'Week': '2026-W08' };
+            headers = ['Project Name', 'Project ID', 'Project Code', 'Issue key', 'Summary', 'Status', 'Assignee', 'Epic', 'Week', 'Description', 'Acceptance Criteria', 'Comments', 'Date', 'Risks & Mitigation', 'Blockers'];
+            sampleRow = { ...commonProjectFields, 'Issue key': 'KAN-202', 'Summary': 'Fix Header Bug', 'Status': 'In Progress', 'Assignee': 'Jane Smith', 'Epic': 'UI', 'Week': '2026-W08', 'Description': 'Header is misaligned', 'Acceptance Criteria': 'Header is straight', 'Comments': 'WIP', 'Date': '2026-02-25', 'Risks & Mitigation': 'CSS conflicts - refactor', 'Blockers': 'Design missing' };
         } else if (type === 'azure_boards') {
-            headers = ['ID', 'Work Item Type', 'Title', 'State', 'Effort', 'Iteration Path', 'Area Path', 'Assigned To', 'Project ID', 'Week'];
-            sampleRow = { 'ID': '9875', 'Work Item Type': 'User Story', 'Title': 'Azure AD Integration', 'State': 'Active', 'Effort': 8, 'Iteration Path': 'Sprint 1', 'Area Path': 'Backend', 'Assigned To': 'tm3', 'Project ID': 'proj2', 'Week': '2026-W08' };
+            headers = ['Project Name', 'Project ID', 'Project Code', 'ID', 'Work Item Type', 'Title', 'State', 'Effort', 'Iteration Path', 'Area Path', 'Assigned To', 'Week', 'Description', 'Acceptance Criteria', 'Comments', 'Date', 'Risks & Mitigation', 'Blockers'];
+            sampleRow = { ...commonProjectFields, 'ID': '9875', 'Work Item Type': 'User Story', 'Title': 'Azure AD Integration', 'State': 'Active', 'Effort': 8, 'Iteration Path': 'Sprint 1', 'Area Path': 'Backend', 'Assigned To': 'Alex Lee', 'Week': '2026-W08', 'Description': 'AD Sync', 'Acceptance Criteria': 'Syncs hourly', 'Comments': 'Blocked by ops', 'Date': '2026-02-25', 'Risks & Mitigation': 'Security review - schedule early', 'Blockers': 'Ops team availability' };
         }
 
         const ws = xlsx.utils.json_to_sheet([sampleRow], { header: headers });
@@ -153,64 +200,133 @@ export default function SettingsView() {
                         onChange={handleImport}
                     />
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                         <button
                             className="btn btn-primary"
                             onClick={() => fileInput.current?.click()}
                             disabled={loading}
-                            style={{ justifyContent: 'center' }}
+                            style={{ justifyContent: 'center', width: '100%' }}
                         >
-                            {loading ? 'Importing Data...' : 'Select Excel File'}
+                            {loading ? 'Importing Data...' : '⬆ Select Excel File to Import'}
                         </button>
-
-                        <div style={{ position: 'relative', display: 'flex', gap: 4 }}>
-                            <button className="btn btn-secondary" onClick={() => downloadTemplate('scrum')} title="Download Scrum Template" style={{ flex: 1, padding: '8px 4px', justifyContent: 'center', fontSize: 11 }}>
-                                <Download size={14} /> Scrum
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                            <button className="btn btn-secondary" onClick={() => downloadTemplate('scrum')} title="Download Scrum Template" style={{ justifyContent: 'center', fontSize: 11, padding: '7px 8px' }}>
+                                <Download size={13} /> Scrum
                             </button>
-                            <button className="btn btn-secondary" onClick={() => downloadTemplate('kanban')} title="Download Kanban Template" style={{ flex: 1, padding: '8px 4px', justifyContent: 'center', fontSize: 11 }}>
-                                <Download size={14} /> Kanban
+                            <button className="btn btn-secondary" onClick={() => downloadTemplate('kanban')} title="Download Kanban Template" style={{ justifyContent: 'center', fontSize: 11, padding: '7px 8px' }}>
+                                <Download size={13} /> Kanban
                             </button>
-                            <button className="btn btn-secondary" onClick={() => downloadTemplate('azure_boards')} title="Download Azure Boards Template" style={{ flex: 1, padding: '8px 4px', justifyContent: 'center', fontSize: 11 }}>
-                                <Download size={14} /> Azure
+                            <button className="btn btn-secondary" onClick={() => downloadTemplate('azure_boards')} title="Download Azure Boards Template" style={{ justifyContent: 'center', fontSize: 11, padding: '7px 8px' }}>
+                                <Download size={13} /> Azure
                             </button>
                         </div>
+                        <p className="text-muted" style={{ fontSize: 11, margin: 0 }}>Download a template first, fill in your data, then upload.</p>
                     </div>
                 </div>
 
-                {/* Project Type Configuration */}
-                <div className="card" style={{ padding: 24 }}>
-                    <h3 style={{ fontSize: 18, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <LayoutTemplate size={20} className="text-emerald" /> Project Typology
-                    </h3>
-                    <p className="text-muted text-sm" style={{ marginBottom: 20 }}>
-                        Configure the ongoing methodology applied to projects. This affects the charts generated in the TPM Command Center.
-                    </p>
+                {/* Project Topology Table */}
+                <div className="card" style={{ padding: 24, gridColumn: '1 / -1' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+                        <h3 style={{ fontSize: 18, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <LayoutTemplate size={20} className="text-emerald" /> Project Topology
+                        </h3>
+                        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                            <select
+                                className="form-input"
+                                style={{ padding: '6px 12px', fontSize: 12, width: 'auto' }}
+                                value={projTypeFilter}
+                                onChange={e => setProjTypeFilter(e.target.value)}
+                            >
+                                <option value="all">All Types</option>
+                                <option value="scrum">Scrum</option>
+                                <option value="kanban">Kanban</option>
+                                <option value="azure_boards">Azure Boards</option>
+                            </select>
+                            <span className="text-muted text-sm">
+                                {state.projects.length} project{state.projects.length !== 1 ? 's' : ''}
+                            </span>
+                        </div>
+                    </div>
 
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                        {state.projects.map(p => (
-                            <div key={p.id} className="project-config-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px', background: 'var(--bg-glass)', border: '1px solid var(--border)', borderRadius: 12, transition: 'var(--transition)' }}>
-                                <div>
-                                    <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-primary)' }}>{p.code} – {p.name}</div>
-                                    <div style={{ fontSize: 12, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                                        <span className="text-muted">Active Methodology:</span>
-                                        <span style={{
-                                            background: p.projectType === 'azure_boards' ? 'rgba(34, 211, 238, 0.15)' : 'var(--violet-dim)',
-                                            color: p.projectType === 'azure_boards' ? 'var(--cyan)' : 'var(--violet-light)',
-                                            padding: '2px 8px', borderRadius: 4, fontWeight: 700, fontSize: 11
-                                        }}>
-                                            {p.projectType?.toUpperCase().replace('_', ' ') || 'SCRUM'}
-                                        </span>
-                                    </div>
-                                </div>
-                                <button
-                                    className="btn btn-secondary"
-                                    onClick={() => toggleProjectType(p)}
-                                    style={{ padding: '8px 16px' }}
-                                >
-                                    Cycle Type <RefreshCw size={14} style={{ marginLeft: 6 }} />
-                                </button>
-                            </div>
-                        ))}
+                    <div style={{ overflowX: 'auto' }}>
+                        <table className="data-table">
+                            <thead>
+                                {/* Search row */}
+                                <tr className="filter-row" style={{ background: 'var(--bg-glass)', borderBottom: '1px solid var(--border)' }}>
+                                    <th colSpan={5} style={{ padding: '8px 16px' }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            <Search size={13} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+                                            <input
+                                                type="text"
+                                                className="form-input"
+                                                style={{ width: '100%', padding: '4px 8px', fontSize: 12, height: 28 }}
+                                                placeholder="Search by project name, code or ID..."
+                                                value={projSearch}
+                                                onChange={e => setProjSearch(e.target.value)}
+                                            />
+                                        </div>
+                                    </th>
+                                </tr>
+                                {/* Header row */}
+                                <tr>
+                                    <th>Project Name</th>
+                                    <th>Code</th>
+                                    <th>Project ID</th>
+                                    <th>Topology / Type</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {(() => {
+                                    const q = projSearch.toLowerCase();
+                                    const filtered = state.projects.filter(p => {
+                                        const matchSearch = !q || p.name.toLowerCase().includes(q) || (p.code || '').toLowerCase().includes(q) || p.id.toLowerCase().includes(q);
+                                        const matchType = projTypeFilter === 'all' || p.projectType === projTypeFilter;
+                                        return matchSearch && matchType;
+                                    });
+
+                                    if (state.projects.length === 0) {
+                                        return (
+                                            <tr>
+                                                <td colSpan={5} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                                                    No projects yet — upload an Excel file or enable mock data on login.
+                                                </td>
+                                            </tr>
+                                        );
+                                    }
+                                    if (filtered.length === 0) {
+                                        return (
+                                            <tr>
+                                                <td colSpan={5} style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)' }}>
+                                                    No projects match your filter.
+                                                </td>
+                                            </tr>
+                                        );
+                                    }
+                                    return filtered.map(p => {
+                                        const typeColor = p.projectType === 'azure_boards' ? 'var(--cyan)' : p.projectType === 'kanban' ? 'var(--amber)' : 'var(--violet-light)';
+                                        const typeBg = p.projectType === 'azure_boards' ? 'rgba(34,211,238,0.12)' : p.projectType === 'kanban' ? 'rgba(245,158,11,0.12)' : 'var(--violet-dim)';
+                                        return (
+                                            <tr key={p.id}>
+                                                <td style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{p.name}</td>
+                                                <td><span style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--violet-light)' }}>{p.code}</span></td>
+                                                <td><span style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--text-muted)' }}>{p.id}</span></td>
+                                                <td>
+                                                    <span style={{ background: typeBg, color: typeColor, padding: '3px 10px', borderRadius: 6, fontWeight: 700, fontSize: 11 }}>
+                                                        {(p.projectType || 'scrum').toUpperCase().replace('_', ' ')}
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <button className="btn btn-secondary" onClick={() => toggleProjectType(p)} style={{ padding: '5px 12px', fontSize: 12 }}>
+                                                        <RefreshCw size={12} /> Cycle Type
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        );
+                                    });
+                                })()}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>

@@ -1,7 +1,6 @@
 import type { Persona, Project } from '../types/index';
 import { useAuth } from '../context/AuthContext';
 import { Bell, ChevronDown, Sun, Moon, LogOut, Settings, Users } from 'lucide-react';
-import { WEEKS } from '../data/mockData';
 
 interface TopbarProps {
     persona: Persona;
@@ -10,9 +9,11 @@ interface TopbarProps {
     selectedProjectId: string;
     setProject: (id: string) => void;
     projects: Project[];
+    weeks: string[];  // distinct weeks from DB jira_stories
     theme: 'light' | 'dark';
     dispatch: React.Dispatch<any>;
     setActiveTab: (t: string) => void;
+    activeTab: string;
 }
 
 const PERSONA_COLORS: Record<Persona, string> = {
@@ -21,7 +22,7 @@ const PERSONA_COLORS: Record<Persona, string> = {
     developer: 'linear-gradient(135deg,#0891b2,#22d3ee)',
 };
 
-export default function Topbar({ persona, selectedWeek, setWeek, selectedProjectId, setProject, projects, theme, dispatch, setActiveTab }: TopbarProps) {
+export default function Topbar({ persona, selectedWeek, setWeek, selectedProjectId, setProject, projects, weeks, theme, dispatch, setActiveTab, activeTab }: TopbarProps) {
     const { user, logout } = useAuth();
     const project = projects.find(p => p.id === selectedProjectId);
     const pages: Record<string, string> = { tpm: 'TPM Command Center', director: 'Director Overview', developer: 'Developer Portal', admin: 'Admin Console' };
@@ -39,19 +40,23 @@ export default function Topbar({ persona, selectedWeek, setWeek, selectedProject
                 <div className="week-selector">
                     <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Project</span>
                     <select value={selectedProjectId} onChange={e => setProject(e.target.value)}>
+                        <option value="">All Projects</option>
                         {projects.map(p => <option key={p.id} value={p.id}>{p.code} – {p.name}</option>)}
                     </select>
                     <ChevronDown size={12} />
                 </div>
 
-                {/* Week selector */}
-                <div className="week-selector">
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Week</span>
-                    <select value={selectedWeek} onChange={e => setWeek(e.target.value)}>
-                        {WEEKS.map(w => <option key={w} value={w}>{w}</option>)}
-                    </select>
-                    <ChevronDown size={12} />
-                </div>
+                {/* Week selector — hidden on Task Progress tab (has its own filter) */}
+                {activeTab !== 'tasks' && (
+                    <div className="week-selector">
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Week</span>
+                        <select value={selectedWeek} onChange={e => setWeek(e.target.value)}>
+                            {weeks.length === 0 && <option value="">No data yet</option>}
+                            {weeks.map(w => <option key={w} value={w}>{w}</option>)}
+                        </select>
+                        <ChevronDown size={12} />
+                    </div>
+                )}
 
                 <div style={{ position: 'relative' }}>
                     <button className="btn btn-secondary btn-sm" style={{ borderRadius: '50%', width: 34, height: 34, padding: 0, display: 'grid', placeItems: 'center' }}>

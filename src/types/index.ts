@@ -16,6 +16,7 @@ export interface TeamMember {
 }
 
 export interface LeaveEntry {
+    id?: string;
     memberId: string;
     week: string; // YYYY-Www
     hoursOff: number;
@@ -35,6 +36,13 @@ export interface JiraStory {
     createdAt?: string; // ISO
     startedAt?: string; // ISO
     completedAt?: string; // ISO
+    description?: string;
+    acceptanceCriteria?: string;
+    comments?: string;
+    pulledDate?: string;
+    risksMitigation?: string;
+    blockers?: string;
+    aiMitigation?: string;
 }
 
 export interface Milestone {
@@ -92,6 +100,7 @@ export interface WeeklyReport {
     ragStatus: RAGStatus;
     accomplishments: string;
     nextWeekPlan: string;
+    risksMitigation: string;
     blockers: string;
     preparedBy: string;
     approvedBy?: string;

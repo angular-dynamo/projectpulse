@@ -30,7 +30,13 @@ db.serialize(() => {
       email TEXT,
       totalHoursPerWeek INTEGER
     )
-  `);
+  `, () => {
+    // ── Default admin user — always present, not part of mock data ──
+    db.run(`
+      INSERT OR IGNORE INTO team_members (id, name, role, appRole, avatar, email, totalHoursPerWeek)
+      VALUES ('admin0', 'Admin User', 'System Administrator', 'admin', 'AU', 'admin@acme.com', 40)
+    `);
+  });
 
   db.run(`
     CREATE TABLE IF NOT EXISTS jira_stories (
@@ -45,7 +51,14 @@ db.serialize(() => {
       projectId TEXT,
       createdAt TEXT,
       startedAt TEXT,
-      completedAt TEXT
+      completedAt TEXT,
+      description TEXT,
+      acceptanceCriteria TEXT,
+      comments TEXT,
+      pulledDate TEXT,
+      risksMitigation TEXT,
+      blockers TEXT,
+      aiMitigation TEXT
     )
   `);
 
@@ -107,6 +120,7 @@ db.serialize(() => {
       accomplishments TEXT,
       nextWeekPlan TEXT,
       blockers TEXT,
+      risksMitigation TEXT,
       preparedBy TEXT,
       approvedBy TEXT,
       status TEXT,
@@ -115,6 +129,27 @@ db.serialize(() => {
       updatedAt TEXT
     )
   `);
+
+  // Migrations for existing database
+  db.run(`ALTER TABLE jira_stories ADD COLUMN description TEXT`, (err) => { /* ignore if exists */ });
+  db.run(`ALTER TABLE jira_stories ADD COLUMN acceptanceCriteria TEXT`, (err) => { /* ignore */ });
+  db.run(`ALTER TABLE jira_stories ADD COLUMN comments TEXT`, (err) => { /* ignore */ });
+  db.run(`ALTER TABLE jira_stories ADD COLUMN pulledDate TEXT`, (err) => { /* ignore */ });
+  db.run(`ALTER TABLE jira_stories ADD COLUMN risksMitigation TEXT`, (err) => { /* ignore */ });
+  db.run(`ALTER TABLE jira_stories ADD COLUMN blockers TEXT`, (err) => { /* ignore */ });
+  db.run(`ALTER TABLE jira_stories ADD COLUMN aiMitigation TEXT`, (err) => { /* ignore */ });
+  db.run(`ALTER TABLE milestones ADD COLUMN startDate TEXT`, (err) => { /* ignore if exists */ });
+  db.run(`ALTER TABLE weekly_reports ADD COLUMN risksMitigation TEXT`, (err) => { /* ignore if exists */ });
+
+  // ── isMock flag: 1 = seeded demo data, 0 = real user data ──────────────────
+  db.run(`ALTER TABLE projects ADD COLUMN isMock INTEGER DEFAULT 0`, (err) => { /* ignore if exists */ });
+  db.run(`ALTER TABLE team_members ADD COLUMN isMock INTEGER DEFAULT 0`, (err) => { /* ignore if exists */ });
+  db.run(`ALTER TABLE jira_stories ADD COLUMN isMock INTEGER DEFAULT 0`, (err) => { /* ignore if exists */ });
+  db.run(`ALTER TABLE milestones ADD COLUMN isMock INTEGER DEFAULT 0`, (err) => { /* ignore if exists */ });
+  db.run(`ALTER TABLE sprints ADD COLUMN isMock INTEGER DEFAULT 0`, (err) => { /* ignore if exists */ });
+  db.run(`ALTER TABLE risks ADD COLUMN isMock INTEGER DEFAULT 0`, (err) => { /* ignore if exists */ });
+  db.run(`ALTER TABLE leave_entries ADD COLUMN isMock INTEGER DEFAULT 0`, (err) => { /* ignore if exists */ });
+  db.run(`ALTER TABLE weekly_reports ADD COLUMN isMock INTEGER DEFAULT 0`, (err) => { /* ignore if exists */ });
 });
 
 module.exports = db;

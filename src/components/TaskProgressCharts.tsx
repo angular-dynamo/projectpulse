@@ -1,3 +1,4 @@
+import React from 'react';
 import { useDashboard } from '../context/DashboardContext';
 import {
     BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -26,6 +27,9 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 
 export default function TaskProgressCharts() {
     const { state } = useDashboard();
+    const [selectedWeekFilter, setSelectedWeekFilter] = React.useState<string>('all');
+    const [searchQ, setSearchQ] = React.useState({ id: '', title: '', effort: '', status: '' });
+
     const project = state.projects.find(p => p.id === state.selectedProjectId);
     const stories = state.jiraStories.filter(s => s.projectId === state.selectedProjectId);
     const allSprints = state.sprints.filter(s => s.projectId === state.selectedProjectId);
@@ -73,15 +77,44 @@ export default function TaskProgressCharts() {
         return { name: s.name, Planned: cumPlanned, Completed: cumCompleted };
     });
 
-    // Epic breakdown
-    const weekStories = stories.filter(s => s.week === state.selectedWeek);
+    // Epic breakdown — use filtered stories for selected week
+    const weekStories = selectedWeekFilter === 'all' ? stories : stories.filter(s => s.week === selectedWeekFilter);
     const epicMap: Record<string, number> = {};
     weekStories.forEach(s => { epicMap[s.epic] = (epicMap[s.epic] || 0) + s.storyPoints; });
     const epicData = Object.entries(epicMap).map(([epic, pts]) => ({ epic, pts }));
 
+    // Derive available weeks for filter
+    const availableWeeks = Array.from(new Set(stories.map(s => s.week))).filter(Boolean).sort().reverse();
+
+    // Search filter
+    const filteredWeekStories = weekStories.filter(s => {
+        return (
+            s.id.toLowerCase().includes(searchQ.id.toLowerCase()) &&
+            s.title.toLowerCase().includes(searchQ.title.toLowerCase()) &&
+            String(s.storyPoints).toLowerCase().includes(searchQ.effort.toLowerCase()) &&
+            s.status.toLowerCase().includes(searchQ.status.toLowerCase())
+        );
+    });
+
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div className="section-label">{isKanban ? 'Kanban Flow & Throughput' : isAzure ? 'Azure Boards Telemetry' : 'Task Progress & Velocity'}</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="section-label" style={{ margin: 0 }}>{isKanban ? 'Kanban Flow & Throughput' : isAzure ? 'Azure Boards Telemetry' : 'Task Progress & Velocity'}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span className="text-muted text-sm">Filter Week:</span>
+                    <select
+                        className="form-input"
+                        style={{ padding: '6px 12px', fontSize: 13, width: 'auto' }}
+                        value={selectedWeekFilter}
+                        onChange={(e) => setSelectedWeekFilter(e.target.value)}
+                    >
+                        <option value="all">All Weeks</option>
+                        {availableWeeks.map(w => (
+                            <option key={w} value={w}>{w}</option>
+                        ))}
+                    </select>
+                </div>
+            </div>
 
             <div className="charts-grid">
                 {/* Donut */}
@@ -215,19 +248,44 @@ export default function TaskProgressCharts() {
                 </div>
 
                 {/* Story table */}
-                <div className="card">
+                <div className="card" style={{ gridColumn: '1 / -1' }}>
                     <div className="card-header">
-                        <div className="card-title">Stories This Week</div>
-                        <div className="text-xs text-muted">{weekStories.length} stories</div>
+                        <div className="card-title">Stories Filtered: {selectedWeekFilter}</div>
+                        <div className="text-xs text-muted">{filteredWeekStories.length} stories</div>
                     </div>
-                    <div style={{ overflowY: 'auto', maxHeight: 220 }}>
+                    <div style={{ overflowY: 'auto', maxHeight: 280 }}>
                         <table className="data-table">
-                            <thead><tr><th>ID</th><th>Title</th><th>{isAzure ? 'Effort' : 'SP'}</th><th>{isAzure ? 'State' : 'Status'}</th></tr></thead>
+                            <thead>
+                                <tr>
+                                    <th>
+                                        <input type="text" placeholder="Search ID" className="form-input" style={{ padding: '4px 8px', fontSize: 11, width: '100%' }}
+                                            value={searchQ.id} onChange={(e) => setSearchQ({ ...searchQ, id: e.target.value })} />
+                                    </th>
+                                    <th>
+                                        <input type="text" placeholder="Search Title" className="form-input" style={{ padding: '4px 8px', fontSize: 11, width: '100%' }}
+                                            value={searchQ.title} onChange={(e) => setSearchQ({ ...searchQ, title: e.target.value })} />
+                                    </th>
+                                    <th>
+                                        <input type="text" placeholder="Search SP" className="form-input" style={{ padding: '4px 8px', fontSize: 11, width: '100%' }}
+                                            value={searchQ.effort} onChange={(e) => setSearchQ({ ...searchQ, effort: e.target.value })} />
+                                    </th>
+                                    <th>
+                                        <input type="text" placeholder="Search Status" className="form-input" style={{ padding: '4px 8px', fontSize: 11, width: '100%' }}
+                                            value={searchQ.status} onChange={(e) => setSearchQ({ ...searchQ, status: e.target.value })} />
+                                    </th>
+                                </tr>
+                                <tr>
+                                    <th style={{ paddingTop: 8 }}>ID</th>
+                                    <th style={{ paddingTop: 8 }}>Title</th>
+                                    <th style={{ paddingTop: 8 }}>{isAzure ? 'Effort' : 'SP'}</th>
+                                    <th style={{ paddingTop: 8 }}>{isAzure ? 'State' : 'Status'}</th>
+                                </tr>
+                            </thead>
                             <tbody>
-                                {weekStories.map(s => (
+                                {filteredWeekStories.map(s => (
                                     <tr key={s.id}>
                                         <td><span className="text-violet font-semibold">{s.id}</span></td>
-                                        <td style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-primary)' }}>{s.title}</td>
+                                        <td style={{ maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-primary)' }}>{s.title}</td>
                                         <td><span style={{ fontWeight: 700, color: 'var(--cyan)' }}>{s.storyPoints}</span></td>
                                         <td><span className={`status-pill pill-${s.status}`}>{s.status}</span></td>
                                     </tr>

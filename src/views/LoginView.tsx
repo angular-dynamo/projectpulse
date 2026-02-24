@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { LogIn, ShieldCheck, Code, PieChart, LayoutDashboard } from 'lucide-react';
+import { LogIn, ShieldCheck, Code, PieChart, LayoutDashboard, Database } from 'lucide-react';
+
+const API_BASE = 'http://127.0.0.1:3001/api';
 
 export default function LoginView() {
     const { login } = useAuth();
@@ -8,12 +10,17 @@ export default function LoginView() {
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const [showDemo, setShowDemo] = useState(false);
+    const [useMockData, setUseMockData] = useState(false);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
         setLoading(true);
         try {
+            // Seed DB with mock data only if toggle is ON
+            if (useMockData) {
+                await fetch(`${API_BASE}/seed`, { method: 'POST' }).catch(() => null);
+            }
             await login(email);
         } catch (err: any) {
             setError(err.message || 'Login failed');
@@ -61,6 +68,46 @@ export default function LoginView() {
                             required
                         />
                     </div>
+
+                    {/* Mock Data Toggle */}
+                    <div style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '12px 16px', borderRadius: 10,
+                        background: useMockData ? 'rgba(109,108,255,0.08)' : 'var(--bg-glass)',
+                        border: `1px solid ${useMockData ? 'var(--violet)' : 'var(--border)'}`,
+                        transition: 'all 0.2s',
+                        cursor: 'pointer',
+                    }} onClick={() => setUseMockData(v => !v)}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <Database size={16} color={useMockData ? 'var(--violet)' : 'var(--text-muted)'} />
+                            <div>
+                                <div style={{ fontSize: 13, fontWeight: 600, color: useMockData ? 'var(--violet)' : 'var(--text-primary)' }}>
+                                    Load Mock Data
+                                </div>
+                                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                    Seed database with sample projects & stories
+                                </div>
+                            </div>
+                        </div>
+                        {/* Toggle switch */}
+                        <div style={{
+                            width: 40, height: 22, borderRadius: 11, position: 'relative',
+                            background: useMockData ? 'var(--violet)' : 'var(--border)',
+                            transition: 'background 0.2s', flexShrink: 0,
+                        }}>
+                            <div style={{
+                                position: 'absolute', top: 3, left: useMockData ? 21 : 3,
+                                width: 16, height: 16, borderRadius: '50%', background: '#fff',
+                                transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                            }} />
+                        </div>
+                    </div>
+
+                    {useMockData && (
+                        <div style={{ fontSize: 12, color: 'var(--violet)', display: 'flex', alignItems: 'center', gap: 6, marginTop: -8 }}>
+                            ℹ️ Mock data will be inserted only if the database is currently empty.
+                        </div>
+                    )}
 
                     {error && (
                         <div style={{ padding: 12, borderRadius: 8, background: 'rgba(239,68,68,0.1)', color: 'var(--red)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>

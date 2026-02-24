@@ -1,0 +1,9 @@
+{
+    "confluence": {
+        "baseUrl": "https://angulardynamo.atlassian.net/wiki",
+        "username": "angular.dynamo@gmail.com",
+        "apiToken": "ATATT3xFfGF0gOXU601xUo9LDF4kQo5OJnUCsBJ0WtNq2uRiEDQonLBqxwdjjVmqO1n6AsV8MceNoxRW66JLSwBs0urTySH7UAgbS4f0umFWYkoL0PZWhYF_01hfmVTGxA3d4YMMpEoWN3dalZAne-LYbeSalFmHOJJKu_tlwzd7W5X9XRaJB20=7D035D86",
+        "targetSpaceKey": "PM",
+        "targetPageId": "262338"
+    }
+}
